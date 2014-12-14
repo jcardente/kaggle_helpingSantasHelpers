@@ -1,0 +1,240 @@
+#+Title: Santa Helpers Kaggle Challenge
+#+Author: John Cardente
+#+Date: December 2014
+#+startup: showall, indent
+
+
+* LINKS
+- http://www.kaggle.com/c/helping-santas-helpers
+- https://github.com/noahvanhoucke/HelpingSantasHelpers
+
+* NOTES
+** <2014-12-02 Tue>
+
+Run of example Python submission evaluation script
+
+#+BEGIN_EXAMPLE
+Success!
+  Score = 1875730155.06
+total time = 4302.30815291
+#+END_EXAMPLE
+
+** <2014-12-08 Mon>
+
+Results running my Julia version of teh evaluation script
+
+#+BEGIN_EXAMPLE
+Success!
+Score = 1.8757301550575209e9
+total runtime = 909.4081900119781
+#+END_EXAMPLE
+
+And these are the results of evaluating my output.
+
+#+BEGIN_EXAMPLE
+Success!
+Score = 1875730155.06
+total runtime = 1523.191195011139
+#+END_EXAMPLE
+
+** <2014-12-09 Tue>
+
+Testing Julia port before uploading to GitHub
+
+Evaluation against sample solution
+#+BEGIN_EXAMPLE
+Success!
+Score = 1875730155.06
+total runtime = 1100.3616909980774
+#+END_EXAMPLE
+
+
+Output from my solution
+
+#+BEGIN_EXAMPLE
+julia SantasHelpers_NaiveSolution.jl toys_rev2.csv mysoln.csv
+total runtime = 208.75394797325134
+#+END_EXAMPLE
+
+Evaluation against my solution
+
+#+BEGIN_EXAMPLE
+Success!
+Score = 1875730155.06
+total runtime = 985.7524769306183
+#+END_EXAMPLE
+
+** <2014-12-11 Thu>
+
+Starting some simple exploratory data analysis,
+
+#+BEGIN_EXAMPLE
+
+> sum(as.numeric(data$Duration))
+[1] 26003950765
+
+> totalhrs/1000000 
+[1] 26003.95
+
+> summary(data$Duration)
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+      1      21      69    2600     468   47470 
+
+
+# R
+foo <- function(rating, sanctioned, unsanctioned) {
+  max(0.25, min(4.0, rating * 
+                     (1.02 ^(sanctioned/60)) *
+                     (0.09 ^(unsanctioned/60))))
+}
+
+
+# Julia
+function scale_rating(rating, sanctioned, unsanctioned)
+ max(0.25,
+    min(4.0, rating * (1.02 ^ (sanctioned/60.0)) *
+            (0.90 ^ (unsanctioned/60.0))))
+end
+
+
+#Python
+def foo(rating, sanctioned, unsanctioned):
+    return max(0.25,
+               min(4.0, rating * (1.02 ** (sanctioned/60.0)) *
+               (0.90 ** (unsanctioned/60.0))))
+
+#+END_EXAMPLE
+
+
+#+BEGIN_EXAMPLE
+
+update_rating <- function(rating, sanctioned, unsanctioned) {
+  max(0.25, min(4.0, rating * 
+                     (1.02 ^(sanctioned/60)) *
+                     (0.09 ^(unsanctioned/60))))
+}
+
+score <- function( last_minute, num_elves) {
+  last_minute * log(1.0 + num_elves)
+}
+
+total_minutes <- 26003950765
+min_prod   <- 0.25
+start_prod <- 1.0
+max_prod   <- 4.0
+max_elves  <- 900
+
+# Fastest execution time
+
+df <- expand.grid(seq(min_prod, max_prod, .25),
+            seq(200, max_elves, 100))
+colnames(df) <- c("Rating", "Elves")
+df$score <- score(total_minutes/(df$Rating * df$Elves), df$Elves)
+
+#+END_EXAMPLE
+
+
+** <2014-12-12 Fri>
+
+Simple calculation. Rating will increase if the ratio sanctioned minutes to unsanctioned minutes is larger than,
+
+\begin{align*}
+1.02^{sm} * 0.9^{um} &> 1\\
+1.02^{sm} &> \frac{1}{0.9^{um}}\\
+sm \, \log(1.02) &> um \, \log\left( \frac{1}{0.9} \right)\\
+\frac{sm}{um} &> \frac{1}{\log(1.02)} \log\left( \frac{1}{0.9} \right)\\
+\frac{sm}{um} &> \approx 5.3\\
+\end{align*}
+
+Might be an important metric while scheduling stuff.
+
+Important to note that unsanctioned time requires rest. So, the
+effective productivity is 1/2 for any unsanctioned time. 
+
+Actually, its worse since rest time doesn't start until the next day. 
+Which means that the time from when the work stops to the start of the
+next day is "dead" time. 
+
+Need a routine that, for a given duration and rating, determines the
+optimal start times relative to a single day. 
+
+Some simple calculations on productivity improvements
+
+\begin{align*}
+r \, 1.02^n &= 4\\
+1.02^n &= \frac{4}{r}\\
+n \log(1.02) &= \log\left(\frac{4}{r}\right)\\
+n &= \frac{\log\left(\frac{4}{r}\right)}{\log(1.02)}
+\end{align*}
+
+This gives a way to predict how many sanctioned hours are required to get
+back to peak productivity.
+
+
+
+
+** <2014-12-12 Fri>
+
+Experimenting a bit with simple shelf packing
+
+#+BEGIN_EXAMPLE
+myToys = read_toys("../data/smalltoys.csv", 99);
+
+function best_start_window(work_duration)
+  #local work_duration = int(ceil(duration / rating))
+
+ if (work_duration < (hrs._minutes_in_24h))    
+    # NB - Pick window that ensures rating adjustment
+    #      is one or greater
+    max_unsanctioned = int(floor(0.165 * work_duration))
+    min_sanctioned   = work_duration - max_unsanctioned
+    best_start       = hrs._day_start
+    best_end         = hrs._day_end -1 - min_sanctioned
+  else
+    # Pick window that maximizes the number of sanctioned
+    # hours.
+    work_duration     = work_duration % hrs._minutes_in_24h
+    best_start       = hrs._day_start
+    best_end         = max(hrs._day_start,
+                           hrs._day_end -1 - min(hrs._hours_per_day * 60, work_duration))
+  end
+
+(best_start, best_end)
+end
+
+
+function scale_rating(rating, sanctioned, unsanctioned)
+ max(0.25,
+    min(4.0, rating * (1.02 ^ (sanctioned/60.0)) *
+            (0.90 ^ (unsanctioned/60.0))))
+end
+
+function score_toy(current_toy, current_elf) 
+  elf_start = current_elf.next_available_time % hrs._minutes_in_24h
+  work_duration = int(ceil(current_toy.duration / current_elf.rating))
+
+  best_start, best_end = best_start_window(work_duration)
+
+  score = 0
+  if (best_start <= elf_start <= best_end)
+      start_minute = max(best_start, elf_start)
+      sanctioned, unsanctioned = get_sanctioned_breakdown(start_minute,work_duration)
+
+      scaled_rating   = scale_rating(current_elf.rating, sanctioned, unsanctioned) / 4
+      scaled_resttime = min(1.0, unsanctioned / (hrs._hours_per_day * 60))
+
+      # Simple score that compares the relative increase in 
+      # rating to the amount of resttime required.
+      score = scaled_rating - scaled_resttime
+  end
+
+  score
+end
+
+function find_best_toy(current_elf, myToys)
+  scores = [score_toy(t, current_elf) for t in values(myToys)] ./ current_elf.rating
+  first(findin(scores, maximum(scores)))
+end
+
+
+#+END_EXAMPLE
