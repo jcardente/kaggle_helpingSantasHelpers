@@ -28,23 +28,17 @@ end
 
 
 function best_start_window(work_duration)
-  #local work_duration = int(ceil(duration / rating))
-
- if (work_duration < (hrs._minutes_in_24h))    
+    
+    if (work_duration > hrs._minutes_in_24h)
+        work_duration = work_duration % hrs._minutes_in_24h
+    end
+    
     # NB - Pick window that ensures rating adjustment
     #      is one or greater
     max_unsanctioned = int(floor(0.165 * work_duration))
-    min_sanctioned   = work_duration - max_unsanctioned
+    min_sanctioned   = int(min(hrs._hours_per_day * 60, work_duration - max_unsanctioned))
     best_start       = hrs._day_start
-    best_end         = hrs._day_end -1 - min_sanctioned
-  else
-    # Pick window that maximizes the number of sanctioned
-    # hours.
-    work_duration     = work_duration % hrs._minutes_in_24h
-    best_start       = hrs._day_start
-    best_end         = max(hrs._day_start,
-                           hrs._day_end -1 - min(hrs._hours_per_day * 60, work_duration))
-  end
+    best_end         = hrs._day_end - min_sanctioned
 
 (best_start, best_end)
 end
@@ -100,48 +94,46 @@ end
 # SCORING
 
 function score_toy(current_toy, current_elf) 
-  elf_start     = current_elf.next_available_time % hrs._minutes_in_24h
-  work_duration = int(ceil(current_toy.duration / current_elf.rating))
+    elf_start     = current_elf.next_available_time % hrs._minutes_in_24h
+    work_duration = int(ceil(current_toy.duration / current_elf.rating))
 
-  # XXX - convert to a lookup table to speed computations
-  best_start, best_end = best_start_window(work_duration)
-  score = 0
-  if (best_start <= elf_start <= best_end)
+    # XXX - convert to a lookup table to speed computations
+    best_start, best_end = best_start_window(work_duration)
+    score = 0
 
-      start_minute = max(best_start, elf_start)
-      wait_time    = max(0, start_minute - elf_start)
-      sanctioned, unsanctioned = get_sanctioned_breakdown(start_minute,work_duration)
+    # XXX account for delta from best start/end.
 
-      effective_prod  = (current_toy.duration) /
-                        (sanctioned + 2*unsanctioned + wait_time)
+    start_minute = max(best_start, elf_start)
+    wait_time    = max(0, start_minute - elf_start)
+    sanctioned, unsanctioned = get_sanctioned_breakdown(start_minute,work_duration)
 
-      new_rating      = scale_rating(current_elf.rating,
-                                     sanctioned,
-                                     unsanctioned)
+    effective_prod  = ((current_toy.duration) /
+                       (sanctioned + 2*unsanctioned + wait_time))
+    
+    new_rating      = scale_rating(current_elf.rating,
+                                   sanctioned,
+                                   unsanctioned)
       
-      # At the end of this toy, how close will we be to the maximum
-      # productivity?
-      scaled_rating   =  new_rating / 4
+    # What will be the new rating when done?
+    scaled_rating   =  new_rating
       
-      # How close to ideal productivity will we be?
-      scaled_prod     = (current_toy.duration/4) / effective_prod
+    # What is the effective productivity?
+    scaled_prod     =  effective_prod
 
-      # How big of a job? Third quantile job size is 468 minutes, so consider
-      # anything that takes a full day of sanctioned time as a big job.
-      scaled_jobsize  = min(1.0, (work_duration) / (hrs._hours_per_day * 60))
+    # How big of a job?
+    scaled_jobsize  = current_toy.duration
 
-      # Compute score based on Elf's coefficients      
-      score = (current_elf.coef_rating   * scaled_rating +
-               current_elf.coef_prod     * scaled_prod   +
-               current_elf.coef_jobsize  * scaled_jobsize)
-  end
+    # Compute score based on Elf's coefficients      
+    score = (current_elf.coef_rating   * scaled_rating +
+             current_elf.coef_prod     * scaled_prod   +
+             current_elf.coef_jobsize  * scaled_jobsize)
 
   score
 end
 
 function find_best_toy(current_elf, toys)
   # Score the toys and take the best one
-  scores = [score_toy(t, current_elf) for t in toys] ./ current_elf.rating
+  scores = [score_toy(t, current_elf) for t in toys] 
   first(findin(scores, maximum(scores)))
 end
 
@@ -150,16 +142,24 @@ end
 # ============================================================
 # EVENT LOOP
 
+# 
+type Event
+    at_minute::Int
+    event_type::Symbol
+    id::Int
+end
+
+function Event(at_minute, event_type)
+  Event(at_minute, event_type, 0)
+end
 
 function event_loop(toy_file, soln_file, elf_coefs)
 
-    myToys  = read_toys(toy_file)
-    #myElves = create_elves(num_elves)
-    myElves = create_elves(elf_coefs)
-
+    myToys    = read_toys(toy_file)
+    myElves   = create_elves(elf_coefs)
     num_elves = length(myElves)
     
-    wcsv     = open(soln_file, "w")
+    wcsv = open(soln_file, "w")
     write(wcsv,"ToyId,ElfId,StartTime,Duration\n");
 
     local last_minute = 0
@@ -230,18 +230,19 @@ s = ArgParseSettings()
 end
 
 parsed_args = parse_args(s)
+NUM_ELVES   = parsed_args["nelves"]
+toy_file    = parsed_args["toy_file"]
+soln_file   = parsed_args["soln_file"]
 
-start     = time()
-NUM_ELVES = parsed_args["nelves"]
-toy_file  = parsed_args["toy_file"]
-soln_file = parsed_args["soln_file"]
+# XXX - cahnge this 
+elf_coefs = vcat(repmat([(1.0, 0, 0)],int(NUM_ELVES/3)),
+                 repmat([(0, 1.0, 0)],int(NUM_ELVES/3)),
+                 repmat([(0, 0, 1.0)],int(NUM_ELVES/3)))
 
-elf_coefs = repmat([(1.0, 0, 0); (0, 1.0, 0); (0,0,1.0)],
-                   int(NUM_ELVES/3), 1)
-
+start = time()
 num_elves, last_minute, avg_prod = event_loop(toy_file, soln_file, elf_coefs)
-
 elapsed_time = time() - start
+
 score = last_minute * log(1.0 + num_elves)
 
 @printf("Runtime= %.2f \tScore= %d \tProd=%.2f\t LastMin=%d\n",
