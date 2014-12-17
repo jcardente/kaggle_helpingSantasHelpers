@@ -16,7 +16,7 @@ using hrs
 using toys
 
 const _start_rating    = 1.0
-const _start_time      = 540
+const _start_time      = hrs._day_start
 const _rating_increase = 1.02
 const _rating_decrease = 0.90
 
@@ -24,14 +24,19 @@ export Elf, update_elf, update_next_available_minute, update_productivity
 
 type Elf
     id::Int
+    coef_rating::FloatingPoint
+    coef_prod::FloatingPoint
+    coef_jobsize::FloatingPoint
     rating::FloatingPoint
-    next_available_time::Int
-    rating_increase::FloatingPoint
-    rating_decrease::FloatingPoint
+    next_available_time::Int    
 end
 
 function Elf(id)
-    Elf(id, _start_rating, _start_time, _rating_increase, _rating_decrease)
+    Elf(id, 1.0, 1.0, 1.0, _start_rating, _start_time)
+end
+
+function Elf(id, coef_rating, coef_prod, coef_jobsize)
+    Elf(id, coef_rating, coef_prod, coef_jobsize, _start_rating, _start_time)
 end
 
 
