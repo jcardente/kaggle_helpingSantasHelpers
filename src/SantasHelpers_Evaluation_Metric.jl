@@ -13,6 +13,8 @@
 using hrs
 using toys
 using elfs
+using ArgParse
+
 
 function read_toys(toy_file, num_toys)
     toysfile = open(toy_file, "r")
@@ -117,11 +119,30 @@ end
 # ============================================================
 # MAIN
 
-const NUM_TOYS  = 10000000
-const NUM_ELVES = 900
+s = ArgParseSettings()
+@add_arg_table s begin
+    "--nelves", "-e"
+        help = "Number of elves"
+        arg_type = Int
+        default = 900
+    "--ntoys", "-t"
+        help = "Number of toys"
+        arg_type = Int
+        default = 10000000
+    "toy_file"
+        help = "Toy input file"
+        required = true
+    "soln_file"
+        help = "Solution output file"
+        required = true
+end
 
-toy_file  = ARGS[1]
-sub_file  = ARGS[2]
+parsed_args = parse_args(s)
+
+NUM_TOYS  = parsed_args["ntoys"]
+NUM_ELVES = parsed_args["nelves"]
+toy_file  = parsed_args["toy_file"]
+sub_file  = parsed_args["soln_file"]
 start     = time()
 
 print(" -- Reading toys file $(toy_file)\n")

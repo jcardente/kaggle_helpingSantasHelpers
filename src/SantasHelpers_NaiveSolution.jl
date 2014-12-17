@@ -13,6 +13,7 @@
 using hrs
 using toys
 using elfs
+using ArgParse
 
 function create_elves(NUM_ELVES)
     local list_elves
@@ -41,8 +42,9 @@ end
 function solution_firstAvailableElf(toy_file, soln_file, myelves)
     # NB- taking from hours file instead of hard coding the start
     #     date in multiple places.
-    ref_time = hrs._reference_start_time
-    toysfile = open(toy_file, "r")
+    ref_time    = hrs._reference_start_time
+    toysfile    = open(toy_file, "r")
+    last_minute = 0
     readline(toysfile)
     
     wcsv     = open(soln_file, "w")
@@ -75,28 +77,55 @@ function solution_firstAvailableElf(toy_file, soln_file, myelves)
         # put elf back in heap
         Collections.enqueue!(myelves, current_elf, (current_elf.next_available_time, current_elf.id))
 
+        last_minute = max(last_minute, work_start_time + work_duration)
+        
         # write to file in correct format
         tt = hrs._reference_start_time + Dates.Minute(work_start_time)
         time_string = join(map(string,[Dates.year(tt) Dates.month(tt) Dates.day(tt) Dates.hour(tt) Dates.minute(tt)]), " ")
         println(wcsv,current_toy.id,",",current_elf.id,",",time_string,",",work_duration)
-    end
-    
+    end    
     close(toysfile)
     close(wcsv)
+
+    avg_prod = sum([e.rating for (e,v) in myelves]) / NUM_ELVES
+
+    return NUM_ELVES, last_minute, avg_prod        
 end
 
 
 # ============================================================
 # MAIN
 
+s = ArgParseSettings()
+@add_arg_table s begin
+    "--nelves", "-e"
+        help = "Number of elves"
+        arg_type = Int
+        default = 900
+    "toy_file"
+    help = "Toy input file"
+    required = true
+    "soln_file"
+    help = "Solution output file"
+    required = true
+    
+end
+ 
+parsed_args = parse_args(s)
+
 start     = time()
-NUM_ELVES = 900
-toy_file  = ARGS[1]
-soln_file = ARGS[2]
+NUM_ELVES = parsed_args["nelves"]
+toy_file  = parsed_args["toy_file"]
+soln_file = parsed_args["soln_file"]
 
 myelves = create_elves(NUM_ELVES)
-solution_firstAvailableElf(toy_file, soln_file, myelves)
+num_elves, last_minute, avg_prod = solution_firstAvailableElf(toy_file, soln_file, myelves)
 
 elapsed_time = time() - start
-println("total runtime = $elapsed_time")
+score = last_minute * log(1.0 + num_elves)
+
+@printf("Runtime= %.2f \tScore= %d \tProd=%.2f\t LastMin=%d\n",
+        elapsed_time, score, avg_prod, last_minute)
+
+
     
