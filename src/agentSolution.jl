@@ -11,19 +11,15 @@ function read_toys(toy_file)
     toysfile = open(toy_file, "r")
     readline(toysfile)
 
-    toy_queue   = Collections.PriorityQueue{Toy, Int}()
+    toy_list = Dict()
     while !eof(toysfile)
         row = split(strip(readline(toysfile)),",")
         new_toy = Toy(row[1], row[2], row[3])
-        Collections.enqueue!(toy_queue, new_toy, new_toy.arrival_minute)
+        #Collections.enqueue!(toy_queue, new_toy, new_toy.arrival_minute)
+        toy_list[new_toy.id] = new_toy 
     end
-    
-    ## if (length(toy_queue) != num_toys)
-    ##     error("\n ** Read a file with $(length(toy_queue)) toys, expected $(num_toys). Exiting.\n")
-    ##     exit(-1)
-    ## end
-    
-    toy_queue
+      
+    toy_list
 end
 
 
@@ -53,29 +49,16 @@ function scale_rating(rating, sanctioned, unsanctioned)
             (elfs._rating_decrease ^ (unsanctioned/60.0))))
 end
 
-## function create_elves(NUM_ELVES::int)
-##     local list_elves
-##     list_elves = Collections.PriorityQueue{Elf, Tuple}()
-##     for i in 1:NUM_ELVES
-##         _elf = Elf(i)
-##         Collections.enqueue!(list_elves, _elf, (_elf.next_available_time, _elf.id))
-##     end
-    
-##     list_elves
-## end
 
-function create_elves(coefs) #::Array{(Float64, Float64, Float64)})
-    local list_elves
-    list_elves = Collections.PriorityQueue{Elf, Tuple}()
+function create_elves(coefs) 
+    local elf_list = Dict()
     for i in 1:length(coefs)
         _elf = Elf(i, coefs[i][1], coefs[i][2], coefs[i][3])
-        Collections.enqueue!(list_elves, _elf, (_elf.next_available_time, _elf.id))
+        elf_list[_elf.id] = _elf
     end
-
-    println("Created $(length(list_elves)) elves")
-    list_elves
+    
+    elf_list
 end
-
 
 
 function assign_elf_to_toy(input_time, current_elf, current_toy)
@@ -115,20 +98,20 @@ function score_toy(current_toy, current_elf)
                                    unsanctioned)
       
     # What will be the new rating when done?
-    scaled_rating   =  new_rating
+    scaled_rating   =  new_rating / 4
       
     # What is the effective productivity?
-    scaled_prod     =  effective_prod
+    scaled_prod     =  effective_prod / 4
 
     # How big of a job?
-    scaled_jobsize  = current_toy.duration
+    scaled_jobsize  = current_toy.duration / (32*60)
 
     # Compute score based on Elf's coefficients      
     score = (current_elf.coef_rating   * scaled_rating +
              current_elf.coef_prod     * scaled_prod   +
              current_elf.coef_jobsize  * scaled_jobsize)
 
-  score
+  float64(score)
 end
 
 function find_best_toy(current_elf, toys)
@@ -154,58 +137,80 @@ function Event(at_minute, event_type)
 end
 
 function event_loop(toy_file, soln_file, elf_coefs)
-
     myToys    = read_toys(toy_file)
     myElves   = create_elves(elf_coefs)
     num_elves = length(myElves)
+
+    events = Collections.PriorityQueue{Event, Int}()
+    for t in values(myToys)
+        ev = Event(t.arrival_minute, :TOY, t.id)
+        Collections.enqueue!(events, ev, ev.at_minute)
+    end
+
+    for e in values(myElves)
+        ev = Event(e.next_available_time, :ELF, e.id)
+        Collections.enqueue!(events, ev, ev.at_minute)        
+    end
     
     wcsv = open(soln_file, "w")
     write(wcsv,"ToyId,ElfId,StartTime,Duration\n");
 
     local last_minute = 0
-    local prev_time   = 0
-    local available_toys = Toy[]
-    local completed_toys = Toy[]
-    while((length(myToys) + length(available_toys)) > 0)
+    local available_elves = Elf[]
+    local available_toys  = Toy[]
+    while(length(events) > 0) 
 
-        # Get next elf
-        current_elf  = Collections.dequeue!(myElves)
-        current_time = current_elf.next_available_time
+        # Get all events at next time
+        current_time = Collections.peek(events)[2]
+        while (length(events) > 0 &&
+               (Collections.peek(events)[2] <= current_time))
+            current_event = Collections.dequeue!(events)
+            if (current_event.event_type == :TOY)
+                push!(available_toys, myToys[current_event.id])
 
-        # Update list of available toys
-        if (current_time > prev_time)
-            while (length(myToys) > 0 &&
-                   Collections.peek(myToys)[1].arrival_minute <= current_time)
-               push!(available_toys, Collections.dequeue!(myToys))
+            elseif (current_event.event_type == :ELF)
+                push!(available_elves, myElves[current_event.id])
             end
         end
+               
+        # XXX - enhance this to find the best allocation across all of the
+        #       available toys and elfs.
+        #scores = [Float64[score_toy(myToys[t], myElves[e]) for t in tmpToys] for e in available_elves]
+        #M = apply(hcat, scores)        
+        while ((length(available_elves) > 0) &&
+               (length(available_toys)  > 0)) 
 
-        # Find the best toy
-        best_toy       = find_best_toy(current_elf, available_toys)
-        current_toy    = available_toys[best_toy]
-        available_toys = Collections.deleteat!(available_toys, best_toy)
-        
-        # Assign the elf
-        work_start_time = current_time
-        work_duration   = int(ceil(current_toy.duration / current_elf.rating))        
-        update_elf(current_elf, current_toy, work_start_time, work_duration)
-        
-        # write to file in correct format
-        tt = hrs._reference_start_time + Dates.Minute(work_start_time)
-        time_string = join(map(string,[Dates.year(tt) Dates.month(tt) Dates.day(tt) Dates.hour(tt) Dates.minute(tt)]), " ")
-        println(wcsv,current_toy.id,",",current_elf.id,",",time_string,",",work_duration)
+            current_elf = first(available_elves)
 
-        # Add elf to event queue
-        Collections.enqueue!(myElves, current_elf, (current_elf.next_available_time,
-                                                    current_elf.id))
-        
-        # Update time
-        last_minute = max(last_minute, work_start_time + work_duration)
-        prev_time = current_time
+            # XXX - Replace with find_best_toy?
+            scores = [score_toy(t, current_elf) for t in available_toys]
+            best_tidx = indmax(scores)
+            current_toy = available_toys[best_tidx]
+
+            # Assign the elf
+            work_start_time = current_time
+            work_duration   = int(ceil(current_toy.duration / current_elf.rating))        
+            update_elf(current_elf, current_toy, work_start_time, work_duration)
+
+            # Remove toy and elf from list of available lists
+            filter!(t -> t != current_toy, available_toys)
+            filter!(e -> e != current_elf, available_elves)
+            
+            # Add event to queue
+            ev = Event(current_elf.next_available_time, :ELF, current_elf.id)
+            Collections.enqueue!(events, ev, ev.at_minute)
+                
+            # write to file in correct format
+            tt = hrs._reference_start_time + Dates.Minute(work_start_time)
+            time_string = join(map(string,[Dates.year(tt) Dates.month(tt) Dates.day(tt) Dates.hour(tt) Dates.minute(tt)]), " ")
+            println(wcsv,current_toy.id,",",current_elf.id,",",time_string,",",work_duration)
+                
+            last_minute = max(last_minute, work_start_time + work_duration)
+        end
     end
     close(wcsv)
 
-    avg_prod = sum([e.rating for (e,v) in myElves]) / num_elves
+    avg_prod = sum([e.rating for e in values(myElves)]) / num_elves
     
     return num_elves, last_minute, avg_prod
 end
