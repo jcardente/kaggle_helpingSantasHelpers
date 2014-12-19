@@ -142,7 +142,7 @@ function score_toys(myToys, available_toys, current_elf)
 end
 
 
-function score_elfs(myElves, available_elves, current_toy)
+function score_elves(myElves, available_elves, current_toy)
     # NB - orginally implemented as list comprehension but
     #      the syntax confused Emacs Julia mode indentation
     #      so going with a function. Can replace with macro later.
