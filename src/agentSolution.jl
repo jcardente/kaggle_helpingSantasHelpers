@@ -64,24 +64,6 @@ function create_elves(params, rep_count)
 end
 
 
-## function elf_next_time(work_start_time, work_duration)
-    
-##     sanctioned, unsanctioned = get_sanctioned_breakdown(work_start_time, work_duration)
-##     if unsanctioned == 0
-##         # NB No rest period required. Elf is available to work anytime
-##         # unless the end_time is at exactly 19:00, then the elf
-##         # has to wait until the next sanctioned minute
-##         work_end_time = work_start_time + work_duration
-##         if ((work_end_time  % hrs._minutes_in_24h) == (19 * 60))
-##             return next_sanctioned_minute(start_time + duration)
-##         else
-##             return work_end_time
-##         end    
-##     end
-##     apply_resting_period(start_time + duration, unsanctioned)
-
-## end
-
 
 # ============================================================
 # SCORING
@@ -92,11 +74,9 @@ function score_toy(current_toy, current_elf)
 
     # XXX - convert to a lookup table to speed computations
     best_start, best_end = best_start_window(work_duration)
-    score = 0
 
     # XXX account for delta from best start/end.
-    start_minute = elf_start
-    sanctioned, unsanctioned = get_sanctioned_breakdown(start_minute,work_duration)
+    sanctioned, unsanctioned = get_sanctioned_breakdown(elf_start,work_duration)
 
     effective_prod  = ((current_toy.duration) /
                        (sanctioned + 2*unsanctioned))
@@ -188,6 +168,67 @@ function Event(at_minute, event_type)
   Event(at_minute, event_type, 0)
 end
 
+
+function assign_fancy(myElves, myToys, available_elves, available_toys)
+    tids = [t for t in available_toys]
+    eids = [e for e in available_elves]
+
+    scores = zeros(length(eids), length(tids))
+    for tidx in 1:length(tids)
+        for eidx in 1:length(eids)
+            scores[eidx, tidx] = score_toy(myToys[tids[tidx]],
+                                           myElves[eids[eidx]])
+        end
+    end
+        
+    assignments = Tuple[]
+    while (maximum(scores) > 0)
+        maxidx = findmax(scores)[2]
+        indxs = ind2sub(size(scores), maxidx)
+        scores[indxs[1],: ] = 0
+        scores[:,indxs[2]]  = 0
+
+        pair = (eids[indxs[1]], tids[indxs[2]])
+        push!(assignments, pair)
+    end
+
+    assignments
+end
+
+
+function assign_simple(myElves, myToys, available_elves, available_toys)
+
+    assignments = Tuple[]
+    av_elves = copy(available_elves)
+    av_toys  = copy(available_toys)
+    while ((length(av_elves) > 0) &&
+        (length(av_toys)  > 0)) 
+
+        if (true)
+            current_elf = myElves[first(av_elves)]
+            scores      = score_toys(myToys, av_toys, current_elf)
+            best_tidx   = find_max_score(scores)[1]
+            current_toy = myToys[best_tidx]
+                
+        else
+            current_toy = myToys[first(av_toys)]
+            scores      = score_elves(myElves, av_elves, current_toy)
+            best_eidx   = find_max_score(scores)[1]
+            current_elf = myElves[best_eidx]
+        end
+
+        setdiff!(av_toys,  current_toy.id)
+        setdiff!(av_elves, current_elf.id)
+
+        pair = (current_elf.id, current_toy.id)
+        push!(assignments, pair)        
+    end
+
+    assignments
+end
+
+
+
 function event_loop(myToys, myElves)
 
     events = Collections.PriorityQueue{Event, Int}()
@@ -221,40 +262,37 @@ function event_loop(myToys, myElves)
                 union!(available_elves, current_event.id)
             end
         end
-               
-        # XXX - enhance this to find the best allocation across all of the
-        #       available toys and elfs.
-        #scores = [Float64[score_toy(myToys[t], myElves[e]) for t in tmpToys] for e in available_elves]
-        #M = apply(hcat, scores)        
-        while ((length(available_elves) > 0) &&
-               (length(available_toys)  > 0)) 
 
-            if (true)
-                current_elf = myElves[first(available_elves)]
-                scores      = score_toys(myToys, available_toys, current_elf)
-                best_tidx   = find_max_score(scores)[1]
-                current_toy = myToys[best_tidx]
-                
-            else
-                current_toy = myToys[first(available_toys)]
-                scores      = score_elves(myElves, available_elves, current_toy)
-                best_eidx   = find_max_score(scores)[1]
-                current_elf = myElves[best_eidx]
-            end
-                           
-            # Assign the elf
+        if ((length(available_elves) == 0) ||
+            (length(available_toys) == 0))
+            continue
+        end
+        
+        
+        # Assign toys and elves 
+        assignments = assign_fancy(myElves, myToys,
+                                    available_elves, available_toys)          
+
+        # Process the assignments
+        for pair in assignments           
+            current_elf = myElves[pair[1]]
+            current_toy = myToys[pair[2]]
+
+            setdiff!(available_toys,  current_toy.id)
+            setdiff!(available_elves, current_elf.id)
+            
             work_start_time = current_time
             work_duration   = int(ceil(current_toy.duration / current_elf.rating))
-
-    
+            work_end_time   = work_start_time + work_duration
+            
             sanctioned, unsanctioned = get_sanctioned_breakdown(work_start_time,
                                                                 work_duration)
             local next_available_time
+
             if unsanctioned == 0
                 # NB No rest period required. Elf is available to work anytime
                 # unless the end_time is at exactly 19:00, then the elf
                 # has to wait until the next sanctioned minute
-                work_end_time = work_start_time + work_duration
                 if ((work_end_time  % hrs._minutes_in_24h) == (19 * 60))
                     next_available_time = next_sanctioned_minute(work_end_time)
                 else
@@ -267,11 +305,7 @@ function event_loop(myToys, myElves)
                                    
             current_elf.next_available_time = next_available_time
             current_elf.rating = adjust_rating(current_elf.rating, sanctioned, unsanctioned)
-
-            # Remove toy and elf from list of available lists
-            setdiff!(available_toys,  current_toy.id)
-            setdiff!(available_elves, current_elf.id)
-            
+ 
             # Add event to queue
             ev = Event(current_elf.next_available_time, :ELF, current_elf.id)
             Collections.enqueue!(events, ev, ev.at_minute)
