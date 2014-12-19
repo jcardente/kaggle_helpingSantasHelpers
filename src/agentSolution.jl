@@ -15,7 +15,6 @@ function read_toys(toy_file)
     while !eof(toysfile)
         row = split(strip(readline(toysfile)),",")
         new_toy = Toy(row[1], row[2], row[3])
-        #Collections.enqueue!(toy_queue, new_toy, new_toy.arrival_minute)
         toy_list[new_toy.id] = new_toy 
     end
       
@@ -43,18 +42,17 @@ end
 # ============================================================
 # ELVES
 
-function scale_rating(rating, sanctioned, unsanctioned)
+function adjust_rating(rating, sanctioned, unsanctioned)
  max(0.25,
     min(4.0, rating * (elfs._rating_increase ^ (sanctioned/60.0)) *
             (elfs._rating_decrease ^ (unsanctioned/60.0))))
 end
 
 
-function create_elves(params, num_elves) 
+function create_elves(params, rep_count) 
     local elf_list = Dict()
 
     num_params = size(params)[1]
-    rep_count = max(1,div(num_elves, num_params))
     for i in 1:num_params
         for j in 1:rep_count
             _elf = Elf((i-1)*rep_count + j, params[i,:])
@@ -66,16 +64,23 @@ function create_elves(params, num_elves)
 end
 
 
-function assign_elf_to_toy(input_time, current_elf, current_toy)
-    start_time = next_sanctioned_minute(input_time)
-    duration   = int(ceil(current_toy.duration / current_elf.rating))
-    sanctioned, unsanctioned = get_sanctioned_breakdown(start_time, duration)
+## function elf_next_time(work_start_time, work_duration)
+    
+##     sanctioned, unsanctioned = get_sanctioned_breakdown(work_start_time, work_duration)
+##     if unsanctioned == 0
+##         # NB No rest period required. Elf is available to work anytime
+##         # unless the end_time is at exactly 19:00, then the elf
+##         # has to wait until the next sanctioned minute
+##         work_end_time = work_start_time + work_duration
+##         if ((work_end_time  % hrs._minutes_in_24h) == (19 * 60))
+##             return next_sanctioned_minute(start_time + duration)
+##         else
+##             return work_end_time
+##         end    
+##     end
+##     apply_resting_period(start_time + duration, unsanctioned)
 
-    if unsanctioned == 0
-        return next_sanctioned_minute(start_time + duration), duration
-    end
-    apply_resting_period(start_time + duration, unsanctioned), duration
-end
+## end
 
 
 # ============================================================
@@ -90,39 +95,83 @@ function score_toy(current_toy, current_elf)
     score = 0
 
     # XXX account for delta from best start/end.
-    start_minute = max(best_start, elf_start)
-    wait_time    = max(0, start_minute - elf_start)
+    start_minute = elf_start
     sanctioned, unsanctioned = get_sanctioned_breakdown(start_minute,work_duration)
 
     effective_prod  = ((current_toy.duration) /
-                       (sanctioned + 2*unsanctioned + wait_time))
+                       (sanctioned + 2*unsanctioned))
     
-    new_rating      = scale_rating(current_elf.rating,
+    new_rating      = adjust_rating(current_elf.rating,
                                    sanctioned,
                                    unsanctioned)
-
+        
     # What will be the new rating when done?
     scaled_rating   =  new_rating / 4
       
     # What is the effective productivity?
     scaled_prod     =  effective_prod / 4
 
-    # How big of a job?
+    # How fast can we get this done?
+    scaled_speed    = (current_toy.duration/work_duration) / 4
+    
+    # How big of a job? Consider 32 hours and more the "max"
+    # big job size.
     scaled_jobsize  = min(1.0, current_toy.duration / (32*60))
 
     # Compute score based on Elf's coefficients      
-    score_vec = vec([1.0, scaled_rating, scaled_prod, scaled_jobsize])
+    score_vec = vec([1.0, scaled_rating, scaled_prod, scaled_jobsize, scaled_speed])
     score     = dot(current_elf.score_params, score_vec)
 
   float64(score)
 end
 
-function find_best_toy(current_elf, toys)
-  # Score the toys and take the best one
-  scores = [score_toy(t, current_elf) for t in toys] 
-  first(findin(scores, maximum(scores)))
+function score_toys(myToys, available_toys, current_elf)
+    # NB - orginally implemented as list comprehension but
+    #      the syntax confused Emacs Julia mode indentation
+    #      so going with a function. Can replace with macro later.
+    scores = Dict()
+    for tid in available_toys
+        current_toy = myToys[tid]
+        score =  score_toy(current_toy, current_elf)
+        if (score >= current_elf.score_thresh)
+            scores[tid] = score
+        end        
+    end
+
+    scores
 end
 
+
+function score_elfs(myElves, available_elves, current_toy)
+    # NB - orginally implemented as list comprehension but
+    #      the syntax confused Emacs Julia mode indentation
+    #      so going with a function. Can replace with macro later.
+    scores = Dict()
+    for eid in available_elves
+        current_elf = myElves[eid]
+        score = score_toy(current_toy, current_elf)
+        if (score >= current_elf.score_thresh)
+            scores[eid] = score
+        end        
+    end
+
+    scores
+end
+
+
+function find_max_score(score_dict)
+    local score_max = -1
+    local score_idx =  0
+
+    for (k,v) in score_dict
+        if (v > score_max)
+            score_max = v
+            score_idx = k
+        end
+    end
+
+    return score_idx, score_max
+end
 
 
 # ============================================================
@@ -141,8 +190,6 @@ end
 
 function event_loop(myToys, myElves)
 
-    num_elves = length(myElves)
-
     events = Collections.PriorityQueue{Event, Int}()
     for t in values(myToys)
         ev = Event(t.arrival_minute, :TOY, t.id)
@@ -158,8 +205,8 @@ function event_loop(myToys, myElves)
     write(wcsv,"ToyId,ElfId,StartTime,Duration\n");
 
     local last_minute = 0
-    local available_elves = Elf[]
-    local available_toys  = Toy[]
+    local available_elves = IntSet()
+    local available_toys  = IntSet()
     while(length(events) > 0) 
 
         # Get all events at next time
@@ -168,10 +215,10 @@ function event_loop(myToys, myElves)
                (Collections.peek(events)[2] <= current_time))
             current_event = Collections.dequeue!(events)
             if (current_event.event_type == :TOY)
-                push!(available_toys, myToys[current_event.id])
+                union!(available_toys, current_event.id)
 
             elseif (current_event.event_type == :ELF)
-                push!(available_elves, myElves[current_event.id])
+                union!(available_elves, current_event.id)
             end
         end
                
@@ -182,21 +229,48 @@ function event_loop(myToys, myElves)
         while ((length(available_elves) > 0) &&
                (length(available_toys)  > 0)) 
 
-            current_elf = first(available_elves)
-
-            # XXX - Replace with find_best_toy?
-            scores = [score_toy(t, current_elf) for t in available_toys]
-            best_tidx = indmax(scores)
-            current_toy = available_toys[best_tidx]
-
+            if (true)
+                current_elf = myElves[first(available_elves)]
+                scores      = score_toys(myToys, available_toys, current_elf)
+                best_tidx   = find_max_score(scores)[1]
+                current_toy = myToys[best_tidx]
+                
+            else
+                current_toy = myToys[first(available_toys)]
+                scores      = score_elves(myElves, available_elves, current_toy)
+                best_eidx   = find_max_score(scores)[1]
+                current_elf = myElves[best_eidx]
+            end
+                           
             # Assign the elf
             work_start_time = current_time
-            work_duration   = int(ceil(current_toy.duration / current_elf.rating))        
-            update_elf(current_elf, current_toy, work_start_time, work_duration)
+            work_duration   = int(ceil(current_toy.duration / current_elf.rating))
+
+    
+            sanctioned, unsanctioned = get_sanctioned_breakdown(work_start_time,
+                                                                work_duration)
+            local next_available_time
+            if unsanctioned == 0
+                # NB No rest period required. Elf is available to work anytime
+                # unless the end_time is at exactly 19:00, then the elf
+                # has to wait until the next sanctioned minute
+                work_end_time = work_start_time + work_duration
+                if ((work_end_time  % hrs._minutes_in_24h) == (19 * 60))
+                    next_available_time = next_sanctioned_minute(work_end_time)
+                else
+                    next_available_time = work_end_time
+                end    
+            else
+                next_available_time = apply_resting_period(work_end_time,
+                                                             unsanctioned)
+            end
+                                   
+            current_elf.next_available_time = next_available_time
+            current_elf.rating = adjust_rating(current_elf.rating, sanctioned, unsanctioned)
 
             # Remove toy and elf from list of available lists
-            filter!(t -> t != current_toy, available_toys)
-            filter!(e -> e != current_elf, available_elves)
+            setdiff!(available_toys,  current_toy.id)
+            setdiff!(available_elves, current_elf.id)
             
             # Add event to queue
             ev = Event(current_elf.next_available_time, :ELF, current_elf.id)
@@ -212,6 +286,7 @@ function event_loop(myToys, myElves)
     end
     close(wcsv)
 
+    num_elves = length(myElves)
     avg_prod = sum([e.rating for e in values(myElves)]) / num_elves
     
     return num_elves, last_minute, avg_prod
@@ -222,12 +297,13 @@ end
 # ============================================================
 # MAIN
 
+if (!isinteractive())        
 s = ArgParseSettings()
 @add_arg_table s begin
     "--nelves", "-e"
-        help = "Number of elves"
+        help = "Elf prototype multiplier"
         arg_type = Int
-        default = 900
+        default = 1
     "toy_file"
         help = "Toy input file"
         required = true
@@ -235,25 +311,19 @@ s = ArgParseSettings()
         help = "Solution output file"
     required = true
       "param_file"
-      help = "Agent parameters file"
+      help = "Elf prototype params file"
       required = true
 end
 
-parsed_args = parse_args(s)
-NUM_ELVES   = parsed_args["nelves"]
-toy_file    = parsed_args["toy_file"]
-soln_file   = parsed_args["soln_file"]
-params_file = parsed_args["param_file"]
-
-# XXX - cahnge this 
-#elf_coefs = vcat(repmat([(0, 1.0, 0, 0, 0)],int(NUM_ELVES/4)),
-#                 repmat([(0, 0, 1.0, 0, 0)],int(NUM_ELVES/4)),
-#                 repmat([(1, 0.0, 0.0, -1.0, 0)],int(NUM_ELVES/4)),                 
-#                 repmat([(0, 0, 0, 1.0, 0)],int(NUM_ELVES/4)))
+parsed_args   = parse_args(s)
+elf_rep_count = parsed_args["nelves"]
+toy_file      = parsed_args["toy_file"]
+soln_file     = parsed_args["soln_file"]
+params_file   = parsed_args["param_file"]
 
 myToys  = read_toys(toy_file)
 params  = readcsv(params_file)
-myElves = create_elves(params, NUM_ELVES)
+myElves = create_elves(params, elf_rep_count)
 
 start = time()
 num_elves, last_minute, avg_prod = event_loop(myToys, myElves)
@@ -264,3 +334,4 @@ score = last_minute * log(1.0 + num_elves)
 @printf("Runtime= %.2f \tScore= %d \tProd=%.2f\t LastMin=%d\n",
         elapsed_time, score, avg_prod, last_minute)
         
+end
