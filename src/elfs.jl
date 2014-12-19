@@ -34,15 +34,10 @@ function Elf(id)
     Elf(id, [0.0; 1.0; 1.0; 1.0], 0.0, _start_rating, _start_time)
 end
 
-## function Elf(id, coef_intercept, coef_rating, coef_prod, coef_jobsize, coef_thresh)
-##     Elf(id, [coef_intercept; coef_rating; coef_prod; coef_jobsize],
-##         coef_thresh, _start_rating, _start_time)
-## end
-
-# XXX - fix this so that it doesn't need to be changed when
-#       a new scoring parameter is added
 function Elf(id, params)
-    Elf(id, vec(params[1:5]), params[6], _start_rating, _start_time)
+    num_params = length(params)
+    Elf(id, vec(params[1:(num_params -1)]), params[num_params],
+        _start_rating, _start_time)
 end
 
 
