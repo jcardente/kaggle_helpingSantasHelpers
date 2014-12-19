@@ -24,19 +24,23 @@ export Elf, update_elf, update_next_available_minute, update_productivity
 
 type Elf
     id::Int
-    coef_rating::FloatingPoint
-    coef_prod::FloatingPoint
-    coef_jobsize::FloatingPoint
+    score_params::Array{Float64,1}
+    score_thresh::FloatingPoint
     rating::FloatingPoint
     next_available_time::Int    
 end
 
 function Elf(id)
-    Elf(id, 1.0, 1.0, 1.0, _start_rating, _start_time)
+    Elf(id, [0.0; 1.0; 1.0; 1.0], 0.0, _start_rating, _start_time)
 end
 
-function Elf(id, coef_rating, coef_prod, coef_jobsize)
-    Elf(id, coef_rating, coef_prod, coef_jobsize, _start_rating, _start_time)
+function Elf(id, coef_intercept, coef_rating, coef_prod, coef_jobsize, coef_thresh)
+    Elf(id, [coef_intercept; coef_rating; coef_prod; coef_jobsize],
+        coef_thresh, _start_rating, _start_time)
+end
+
+function Elf(id, params)
+    Elf(id, vec(params[1:4]), params[5], _start_rating, _start_time)
 end
 
 

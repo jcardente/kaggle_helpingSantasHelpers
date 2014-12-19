@@ -50,11 +50,16 @@ function scale_rating(rating, sanctioned, unsanctioned)
 end
 
 
-function create_elves(coefs) 
+function create_elves(params, num_elves) 
     local elf_list = Dict()
-    for i in 1:length(coefs)
-        _elf = Elf(i, coefs[i][1], coefs[i][2], coefs[i][3])
-        elf_list[_elf.id] = _elf
+
+    num_params = size(params)[1]
+    rep_count = max(1,div(num_elves, num_params))
+    for i in 1:num_params
+        for j in 1:rep_count
+            _elf = Elf((i-1)*rep_count + j, params[i,:])
+            elf_list[_elf.id] = _elf
+        end        
     end
     
     elf_list
@@ -85,7 +90,6 @@ function score_toy(current_toy, current_elf)
     score = 0
 
     # XXX account for delta from best start/end.
-
     start_minute = max(best_start, elf_start)
     wait_time    = max(0, start_minute - elf_start)
     sanctioned, unsanctioned = get_sanctioned_breakdown(start_minute,work_duration)
@@ -96,7 +100,7 @@ function score_toy(current_toy, current_elf)
     new_rating      = scale_rating(current_elf.rating,
                                    sanctioned,
                                    unsanctioned)
-      
+
     # What will be the new rating when done?
     scaled_rating   =  new_rating / 4
       
@@ -104,12 +108,11 @@ function score_toy(current_toy, current_elf)
     scaled_prod     =  effective_prod / 4
 
     # How big of a job?
-    scaled_jobsize  = current_toy.duration / (32*60)
+    scaled_jobsize  = min(1.0, current_toy.duration / (32*60))
 
     # Compute score based on Elf's coefficients      
-    score = (current_elf.coef_rating   * scaled_rating +
-             current_elf.coef_prod     * scaled_prod   +
-             current_elf.coef_jobsize  * scaled_jobsize)
+    score_vec = vec([1.0, scaled_rating, scaled_prod, scaled_jobsize])
+    score     = dot(current_elf.score_params, score_vec)
 
   float64(score)
 end
@@ -125,7 +128,7 @@ end
 # ============================================================
 # EVENT LOOP
 
-# 
+
 type Event
     at_minute::Int
     event_type::Symbol
@@ -136,9 +139,8 @@ function Event(at_minute, event_type)
   Event(at_minute, event_type, 0)
 end
 
-function event_loop(toy_file, soln_file, elf_coefs)
-    myToys    = read_toys(toy_file)
-    myElves   = create_elves(elf_coefs)
+function event_loop(myToys, myElves)
+
     num_elves = length(myElves)
 
     events = Collections.PriorityQueue{Event, Int}()
@@ -231,21 +233,30 @@ s = ArgParseSettings()
         required = true
     "soln_file"
         help = "Solution output file"
-        required = true
+    required = true
+      "param_file"
+      help = "Agent parameters file"
+      required = true
 end
 
 parsed_args = parse_args(s)
 NUM_ELVES   = parsed_args["nelves"]
 toy_file    = parsed_args["toy_file"]
 soln_file   = parsed_args["soln_file"]
+params_file = parsed_args["param_file"]
 
 # XXX - cahnge this 
-elf_coefs = vcat(repmat([(1.0, 0, 0)],int(NUM_ELVES/3)),
-                 repmat([(0, 1.0, 0)],int(NUM_ELVES/3)),
-                 repmat([(0, 0, 1.0)],int(NUM_ELVES/3)))
+#elf_coefs = vcat(repmat([(0, 1.0, 0, 0, 0)],int(NUM_ELVES/4)),
+#                 repmat([(0, 0, 1.0, 0, 0)],int(NUM_ELVES/4)),
+#                 repmat([(1, 0.0, 0.0, -1.0, 0)],int(NUM_ELVES/4)),                 
+#                 repmat([(0, 0, 0, 1.0, 0)],int(NUM_ELVES/4)))
+
+myToys  = read_toys(toy_file)
+params  = readcsv(params_file)
+myElves = create_elves(params, NUM_ELVES)
 
 start = time()
-num_elves, last_minute, avg_prod = event_loop(toy_file, soln_file, elf_coefs)
+num_elves, last_minute, avg_prod = event_loop(myToys, myElves)
 elapsed_time = time() - start
 
 score = last_minute * log(1.0 + num_elves)
