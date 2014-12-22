@@ -63,7 +63,7 @@ params  = readcsv(params_file)
 myElves = create_elves(params, elf_rep_count)
 
 start = time()
-num_elves, last_minute, avg_prod = event_loop(myToys, myElves, soln_file)
+solution, num_elves, last_minute, avg_prod = event_loop(myToys, myElves, soln_file)
 elapsed_time = time() - start
 
 score = last_minute * log(1.0 + num_elves)
@@ -71,3 +71,21 @@ score = last_minute * log(1.0 + num_elves)
 @printf("Runtime= %.2f \tScore= %d \tProd=%.2f\t LastMin=%d\n",
         elapsed_time, score, avg_prod, last_minute)
         
+wcsv = open(soln_file, "w")
+write(wcsv,"ToyId,ElfId,StartTime,Duration\n");
+for i in 1:size(solution)[2]
+    toy_id          = solution[1,i]
+    elf_id          = solution[2,i]
+    work_start_time = solution[3,i]
+    work_duration   = solution[4,i]
+    
+    tt = hrs._reference_start_time + Dates.Minute(work_start_time)
+    time_string = join(map(string,[Dates.year(tt) Dates.month(tt) Dates.day(tt) Dates.hour(tt) Dates.minute(tt)]), " ")
+    println(wcsv,
+            toy_id,",",
+            elf_id,",",
+            time_string,",",
+            work_duration)
+end
+
+close(wcsv)

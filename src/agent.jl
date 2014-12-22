@@ -225,9 +225,10 @@ function event_loop(myToys, myElves, soln_file)
         ev = Event(e.next_available_time, :ELF, e.id)
         Collections.enqueue!(events, ev, ev.at_minute)        
     end
-    
-    wcsv = open(soln_file, "w")
-    write(wcsv,"ToyId,ElfId,StartTime,Duration\n");
+
+    # Solutions
+    solution = Array(Int32, 4, length(myToys))
+    local soln_idx = 1    
 
     local last_minute = 0
     local available_elves = IntSet()
@@ -294,20 +295,22 @@ function event_loop(myToys, myElves, soln_file)
             ev = Event(current_elf.next_available_time, :ELF, current_elf.id)
             Collections.enqueue!(events, ev, ev.at_minute)
                 
-            # write to file in correct format
-            tt = hrs._reference_start_time + Dates.Minute(work_start_time)
-            time_string = join(map(string,[Dates.year(tt) Dates.month(tt) Dates.day(tt) Dates.hour(tt) Dates.minute(tt)]), " ")
-            println(wcsv,current_toy.id,",",current_elf.id,",",time_string,",",work_duration)
-                
+            # Save solution
+            solution[1,soln_idx] = current_toy.id
+            solution[2,soln_idx] = current_elf.id
+            solution[3,soln_idx] = work_start_time
+            solution[4,soln_idx] = work_duration
+            soln_idx += 1
+            
             last_minute = max(last_minute, work_start_time + work_duration)
         end
     end
-    close(wcsv)
+
 
     num_elves = length(myElves)
     avg_prod = sum([e.rating for e in values(myElves)]) / num_elves
     
-    return num_elves, last_minute, avg_prod
+    return solution, num_elves, last_minute, avg_prod
 end
 
 end # end module
