@@ -213,10 +213,10 @@ end
 
 
 
-function event_loop(myToys, myElves, soln_file)
+function event_loop(myToys, myElves)
 
     events = Collections.PriorityQueue{Event, Int}()
-    for t in values(myToys)
+    for t in myToys #values(myToys)
         ev = Event(t.arrival_minute, :TOY, t.id)
         Collections.enqueue!(events, ev, ev.at_minute)
     end
@@ -238,7 +238,7 @@ function event_loop(myToys, myElves, soln_file)
         # Get all events at next time
         current_time = Collections.peek(events)[2]
         while (length(events) > 0 &&
-               (Collections.peek(events)[2] <= current_time))
+               (Collections.peek(events)[2] <= (current_time+1)))
             current_event = Collections.dequeue!(events)
             if (current_event.event_type == :TOY)
                 union!(available_toys, current_event.id)
