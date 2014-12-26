@@ -80,12 +80,12 @@ function score_submission(sub_file, myToys, NUM_ELVES)
         end
 
         if start_minute < myElves[current_elf].next_available_time
-            error("\n ** Elf $(current_elf) needs his rest, he is not available now $(start_minute) but will be later at $(myElves[current_elf].next_available_time)\n")
+            error("\n ** Elf $(current_elf) needs his rest, he is not available now $(start_minute) but will be later at $(myElves[current_elf].next_available_time), toy $(current_toy) rating  $(myElves[current_elf].rating)\n")
             exit(-1)
         end
 
         if !(toys.is_complete(myToys[current_toy], start_minute, duration, myElves[current_elf].rating))
-            error("Toy $(current_toy) is not complete\n")
+            error("Toy $(current_toy) is not complete\n $(start_minute) $(duration) $(myElves[current_elf].rating)\n")
             exit(-1)
         else
             append!(complete_toys, [int(current_toy)])
@@ -94,7 +94,15 @@ function score_submission(sub_file, myToys, NUM_ELVES)
             end
         end
 
-        elfs.update_elf(myElves[current_elf], myToys[current_toy], start_minute, duration)           
+        old_rating = myElves[current_elf].rating
+        elfs.update_elf(myElves[current_elf], myToys[current_toy], start_minute, duration)
+
+        ## if(current_elf == 1)
+        ##     @printf("E:%d T:%d S:%d D:%d R:%f N:%d\n",
+        ##             current_elf, current_toy, start_minute, duration,
+        ##             old_rating, myElves[current_elf].next_available_time)
+        ##     end
+        
     end
 
     if length(complete_toys) != length(myToys)
@@ -110,7 +118,7 @@ function score_submission(sub_file, myToys, NUM_ELVES)
 
     score = last_minute * log(1.0 + length(myElves))
     println("\nSuccess!")
-    @printf("Score = %.02f\n", score)
+    @printf("Last Minute = %d Score = %.02f\n", last_minute, score)
 end
 
 

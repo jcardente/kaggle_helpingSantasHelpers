@@ -12,6 +12,13 @@ function tlt (a,b)
 end
 
 
+function adjust_rating(rating, sanctioned, unsanctioned)
+ max(0.25,
+    min(4.0, rating * (elfs._rating_increase ^ (sanctioned/60.0)) *
+            (elfs._rating_decrease ^ (unsanctioned/60.0))))
+end
+
+
 function vectorSolve(myToys, num_elves)
     
     # bucket toys into days
@@ -28,7 +35,7 @@ function vectorSolve(myToys, num_elves)
 
     # Setup elf vectors
     next_minutes = fill(hrs._day_start, num_elves);
-    ratings      = fill(elfs._start_rating, num_elves);    
+    ratings      = ones(num_elves) .* elfs._start_rating;    
     work_hours   = zeros(num_elves)
     assignments  = Array(Any, num_elves)
     for i in 1:num_elves
@@ -36,7 +43,7 @@ function vectorSolve(myToys, num_elves)
     end
 
     # Array to hold solution
-    solution = Array(Int32, 4, length(myToys))
+    solution = Array(Int32, 5, length(myToys))
     soln_idx = 1    
 
     # Cycle through end of days or until 
@@ -46,60 +53,69 @@ function vectorSolve(myToys, num_elves)
     last_minute = 0
     while (((current_day += 1) <= max_day) ||
            (length(av_toys) > 0))
-
-        print(".")
+        
+        day_start_minute = (current_day - 1) * hrs._minutes_in_24h
         
         # Add new toys and resort
         if (current_day <= max_day)
             append!(av_toys, toys_day[current_day])
         end
-        sort!(av_toys, lt=tlt)            	
+        sort!(av_toys, lt=tlt)           	
 
                    
         # iterate over toys until all plans full or
         # no more available toys
         leftover_toys = Tuple[]
-        done_mask     = map(x -> (x < hrs._day_end) ? 1.0 : Inf, next_minutes)
+        done_mask     = map(x -> x < (day_start_minute + hrs._day_end) ? 1.0 : Inf, next_minutes)
         while ((length(av_toys) > 0) &&
                (any(done_mask .< Inf)))
     
             tup      = shift!(av_toys)
             tid      = tup[1]            
-            arrival  = tup[2]
+            arrival  = tup[2] 
             duration = tup[3]
             
             wait_times = max(0, arrival .- next_minutes)     
-            work_times = duration ./ ratings
+            work_times = int(ceil(duration ./ ratings))
             rem_times  = 1140 - (next_minutes + wait_times + work_times)
-            #left_times = map( x -> (x > 0) ? x : 0, rem_times)
-            #unsanctioned_times = map( x -> (x < 0) ? abs(x) : 0, rem_times)
 
             # XXX - figure out a better score metric?
             # XXX - Add work_times
             (mt, idx) = findmin(done_mask .*
                                 (abs(rem_times) .+ wait_times))
-            
+
+
+            # Do the assignment
             this_start_minute = next_minutes[idx] + wait_times[idx]
             this_duration     = work_times[idx]
-            this_next_minute  = this_start_minute + this_duration            
-            this_unsanctioned = max(0, this_next_minute - hrs._day_end)
-            this_sanctioned   = this_duration - this_unsanctioned
+            push!(assignments[idx],
+                  (tid, idx, this_start_minute, this_duration, ratings[idx]))
             
-            ## if (this_unsanctioned > 30)
-            ##     # Too much unsanctioned time
-            ##     # XXX - need a way to determine if this is a super
-            ##     #       big toy and let the allocation happen
-            ##     push!(leftover_toys, tup)
-            ##     continue
-            ## end
+            this_sanctioned, this_unsanctioned =
+                get_sanctioned_breakdown(this_start_minute,  this_duration)
             
-            push!(assignments[idx], (tid, idx, this_start_minute, this_duration))
-            # XXX - update rating
-            next_minutes[idx] = this_next_minute           
-            if ( this_unsanctioned > 0)
-                done_mask[idx] = Inf
-            end
+            # Calculate end time
+            this_work_end_time = this_start_minute + this_duration 
+            last_minute        = max(last_minute, this_work_end_time)
+            
+            # Update elf
+            if (this_unsanctioned > 0)             
+                this_next_minute = apply_resting_period(this_work_end_time, this_unsanctioned)       
+                done_mask[idx]   = Inf
+            else
+                if (hrs.is_sanctioned_time(this_work_end_time))
+                    this_next_minute = this_work_end_time
+                else
+                    this_next_minute = hrs.next_sanctioned_minute(this_work_end_time)
+                end
+            end           
+            
+            next_minutes[idx] = this_next_minute
+            ratings[idx]      = adjust_rating(ratings[idx],
+                                              this_sanctioned,
+                                              this_unsanctioned)
         end
+
 
         # Record and reset assignments
         for i in 1:num_elves
@@ -110,15 +126,9 @@ function vectorSolve(myToys, num_elves)
         end
                 
         # Carry over any left over toys
-        append!(av_toys, leftover_toys)
-        
-        # reset next_minutes
-        last_minute = max(last_minute, maximum(next_minutes))
-        next_minutes = max(0, next_minutes .- hrs._day_end) .+
-                       fill(hrs._day_start, num_elves);
-        
+       append!(av_toys, leftover_toys)
+                                    
     end
-
 
     for j in jobs
         solution[1,soln_idx] = j[1]
