@@ -54,7 +54,8 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
     ratings      = ones(Float64,num_elves) .* elfs._start_rating
     assign_count = zeros(Int64, num_elves)
     assignments  = zeros(Int64, 4, hrs._hours_per_day * 60, num_elves)
-
+    done_mask    = fill(Inf, num_elves)
+    
     # Prep output file
     wcsv = open(soln_file, "w")
     write(wcsv,"ToyId,ElfId,StartTime,Duration\n");
@@ -92,8 +93,15 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
 
         # iterate over toys until all plans full or
         # no more available toys
-        done_mask = map(x -> x < (day_start_minute + hrs._day_end) ? 1.0 : Inf, next_minutes)
-        for tid in sort([min_av_toy:max_av_toy], by= x -> myToys[3,x], rev=true)           	
+        for eid in 1:num_elves
+            done_mask[eid] =  next_minutes[eid] < (day_start_minute + hrs._day_end) ? 1.0 : Inf
+        end
+        
+        tid_list  =  sort!([min_av_toy:max_av_toy],
+                           lt= (a,b) -> ((myToys[2,a] <= myToys[2,b]) & (myToys[3,a] > myToys[3,b])))
+                           #by= x -> myToys[3,x],
+                           #rev=true) 
+        for tid in tid_list
 
             if (toy_done[tid])
                 continue
@@ -109,13 +117,13 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
 
             # Calculate some metrics and select Elf with minimum
             # score.
-            start_times = max(arrival, next_minutes, day_start_minute)
+            start_times = max(arrival, next_minutes, day_start_minute + hrs._day_start)
             work_times  = int(ceil(duration ./ ratings))
-            wait_times  = max(0, arrival .- next_minutes)
-            rem_times   = max(0,(start_times .+ work_times ) - hrs._day_end)
+            end_times   = start_times .+ work_times
+            #wait_times  = max(0, arrival .- next_minutes)
+            #rem_times   = max(0,(start_times .+ work_times ) - hrs._day_end)
 
-            (mt, idx) = findmin(done_mask .*
-                                ((2*rem_times) .+ work_times .+ wait_times))
+            (mt, idx) = findmin(done_mask .* end_times)
 
             # See if this is an optimal time to start this toy
             this_duration     = work_times[idx]
@@ -135,8 +143,7 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
             assign_count[idx] += 1
             assignments[:,assign_count[idx],idx] = [tid; idx; this_start_minute; this_duration]
             toy_done[tid] = true
-            min_av_toy    = min(min_av_toy, tid)
-            
+
             assigned_count += 1
             if ((assigned_count % 10000) == 0)
                 @printf("Assigned toys: %d\n", assigned_count)
@@ -183,6 +190,8 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
             end
         end
 
+        min_av_toy = findfirst(x -> !x, toy_done)
+        
         ## Clear out the assignments matrix
         fill!(assignments,0)
         fill!(assign_count, 0)
