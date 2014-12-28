@@ -44,7 +44,9 @@ function vectorSolve(myToys, num_elves)
         toys_day[d] = Tuple[]
         for tid in findin(days, d)
             t = myToys[tid]
-            push!(toys_day[d], (t.id, t.arrival_minute, t.duration))
+            sanctioned, unsanctioned = get_sanctioned_breakdown(hrs._day_start,
+                                                                t.duration)
+            push!(toys_day[d], (t.id, t.arrival_minute, t.duration, unsanctioned/sanctioned))
         end
     end
 
@@ -84,10 +86,11 @@ function vectorSolve(myToys, num_elves)
         while ((length(av_toys) > 0) &&
                (any(done_mask .< Inf)))
     
-            tup      = shift!(av_toys)
-            tid      = tup[1]            
-            arrival  = tup[2] 
-            duration = tup[3]
+            tup       = shift!(av_toys)
+            tid       = tup[1]            
+            arrival   = tup[2] 
+            duration  = tup[3]
+            hrs_ratio = tup[4]
 
             # Calculate some metrics and select Elf with minimum
             # score.
@@ -134,7 +137,13 @@ function vectorSolve(myToys, num_elves)
             ## this_rel_start = (this_start_minute % hrs._minutes_in_24h)
             ## best_delta     = min(max(0,this_rel_start - best_start),
             ##                      abs(this_rel_start - best_end))
-            if ((this_sanctioned/ this_unsanctioned) < 5.3)
+            # XXX - need to take into account large toys! Don't want to delay
+            #       then too long. Instead, precompute their optimal sanctioned/unsanctioned
+            #       ratio.
+            #
+            # XXX - think about starting long toys before the start of day for
+            #       elves that don't need rest
+            if ((this_unsanctioned/ this_sanctioned) > hrs_ratio) # 5.3 is optimal
                 ## @printf("T:%d D:%d S:%d NS:%d BS:%d BE:%d\n",
                 ##         tid, duration, this_start_minute,
                 ##         (this_start_minute % hrs._minutes_in_24h), best_start, best_end)
