@@ -37,8 +37,9 @@ end
 function vectorSolve(myToys, num_elves)
     
     # bucket toys into days
-    days    = div([t.arrival_minute for t in myToys], (24*60)) .+ 1;
-    max_day = maximum(days)   
+    num_toys = length(myToys)
+    days     = div([t.arrival_minute for t in myToys], (24*60)) .+ 1;
+    max_day  = maximum(days)   
     toys_day = Array(Any, max_day)
     for d in 1:max_day
         toys_day[d] = Tuple[]
@@ -64,10 +65,11 @@ function vectorSolve(myToys, num_elves)
     soln_idx = 1    
 
     # Cycle through end of days or until 
-    current_day = 0
-    av_toys     = Tuple[]
-    jobs        = Any[]
-    last_minute = 0
+    current_day    = 0
+    av_toys        = Tuple[]
+    jobs           = Any[]
+    last_minute    = 0
+    assigned_count = 0
     while (((current_day += 1) <= max_day) ||
            (length(av_toys) > 0))
         
@@ -99,62 +101,29 @@ function vectorSolve(myToys, num_elves)
             wait_times  = max(0, arrival .- next_minutes)
             rem_times   = max(0,(start_times .+ work_times ) - hrs._day_end)
 
-            #1140 - (next_minutes + wait_times + work_times)
-
-            ## XXX - use the optimal ratio for the decision to postpone
-            ##       a toy's allocation. Use the estimated worktime and remtime
-            ##       as filtering criteria, make remtime cost 2x worktime for
-            ##       the minimum.
-            
-            ## THESE SIGNALS DID PRETTY WELL
-            ##
-            ## work_times = int(ceil(duration ./ ratings))
-            ## rem_times  = 1140 - (next_minutes + wait_times + work_times)
-            ## 
-            ## # XXX - figure out a better score metric?
-            ## # XXX - Add work_times
-            ## (mt, idx) = findmin(done_mask .*
-            ##                     (abs(rem_times) .+ wait_times))
-
-            
-            # Score metrics, scaled 0-1
-            # start_time  .% hrs._minutes_in_24h) .- hrs._day_start) ./ (hrs._hours_per_day * 60)            
-            #wait_times  = max(0, arrival .- next_minutes) ./ duration
-            #rem_times   = 1- max(1,duration ./ ((hrs._day_end * 60) .- next_minutes))
-            #speeds      = 1- ratings ./ 4
-            #jobsize     = fill(min(1.0, duration / (32*60)), num_elves)
-            
             (mt, idx) = findmin(done_mask .*
                                 ((2*rem_times) .+ work_times .+ wait_times))
 
             # See if this is an optimal time to start this toy
             this_duration     = work_times[idx]
-            this_start_minute = next_minutes[idx] + wait_times[idx]            
+            this_start_minute = start_times[idx] 
             this_sanctioned, this_unsanctioned =
                 get_sanctioned_breakdown(this_start_minute,  this_duration)
  
-            ## best_start, best_end = best_start_window(this_duration)           
-            ## this_rel_start = (this_start_minute % hrs._minutes_in_24h)
-            ## best_delta     = min(max(0,this_rel_start - best_start),
-            ##                      abs(this_rel_start - best_end))
-            # XXX - need to take into account large toys! Don't want to delay
-            #       then too long. Instead, precompute their optimal sanctioned/unsanctioned
-            #       ratio.
-            #
-            # XXX - think about starting long toys before the start of day for
-            #       elves that don't need rest
-            if ((this_unsanctioned/ this_sanctioned) > hrs_ratio) # 5.3 is optimal
-                ## @printf("T:%d D:%d S:%d NS:%d BS:%d BE:%d\n",
-                ##         tid, duration, this_start_minute,
-                ##         (this_start_minute % hrs._minutes_in_24h), best_start, best_end)
-                ## push!(leftover_toys, tup)
+            if ((this_unsanctioned/ this_sanctioned) > hrs_ratio)
+                # This assignment doesn't achieve the optimal ratio
+                # of sanctioned and unsanctioned hours. Rschedule
                 continue
             end
 
             # Looks good, do the assignment
             push!(assignments[idx],
                   (tid, idx, this_start_minute, this_duration))
-            
+
+            assigned_count += 1
+            if ((assigned_count % 10000) == 0)
+                @printf("Assigned toys: %d\n", assigned_count)
+            end
             
             # Calculate end time
             this_work_end_time = this_start_minute + this_duration 
