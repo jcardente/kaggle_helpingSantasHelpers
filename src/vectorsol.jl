@@ -25,8 +25,9 @@ function read_fast!(toy_file, myToys, optRatios)
         arrival  = convert_to_minute(row[2])
         duration = int(row[3])
         day      = div(arrival, hrs._minutes_in_24h) + 1
-
-        myToys[:,id] = [id; arrival; duration; day]
+        min      = arrival % (hrs._minutes_in_24h)
+        
+        myToys[:,id] = [id; arrival; duration; day; min]
         
         sanctioned, unsanctioned = get_sanctioned_breakdown(hrs._day_start,
                                                             duration)
@@ -38,17 +39,30 @@ function read_fast!(toy_file, myToys, optRatios)
     nothing
 end
 
+function adj_arrival(idx, myToys)
+    local retval = myToys[2,idx]
+    if (myToys[5,idx] < hrs._day_start)
+        retval = (myToys[4,idx]-1) * hrs._minutes_in_24h + hrs._day_start
+    elseif (myToys[5,idx] >= hrs._day_end)
+        retval = (myToys[4,idx]) * hrs._minutes_in_24h + hrs._day_start
+    end
+    retval
+end
 
 function vectorSolve(toy_file, soln_file, num_elves, num_toys)
     
     # Create data structures to hold toys
-    myToys    = zeros(Int64, 4, num_toys)
+    myToys    = zeros(Int64, 5, num_toys)
     optRatios = zeros(Float64, num_toys)
-    toy_done  = falses(num_toys)
+    #toy_order = zeros(Int64, num_toys)
     read_fast!(toy_file, myToys, optRatios)
-    days      = myToys[4,:]'
-    max_day   = maximum(days)
-    
+
+    sort_arrivals = map(x -> adj_arrival(x,myToys), [1:num_toys])
+    toy_order     = sortperm([1:num_toys], lt= (a,b) -> (sort_arrivals[a] <= sort_arrivals[b]) & (myToys[3,a] > myToys[3,b]))
+    toy_done      = falses(num_toys)
+    days          = myToys[4,toy_order]'
+    max_day       = maximum(days)
+
     # Setup elf matrices
     next_minutes = ones(Int64, num_elves)  .* hrs._day_start
     ratings      = ones(Float64,num_elves) .* elfs._start_rating
@@ -73,11 +87,16 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
         day_start_minute = (current_day - 1) * hrs._minutes_in_24h
         
         println("Day: $(current_day) Done:$(assigned_count) $(sum(toy_done)) of $(length(toy_done)) $(min_av_toy) $(max_av_toy)")
-                
+
+        if (current_day > 10)
+            println("Detected runaway, terminating early")
+            break
+        end
+        
         # Add new toys and resort.
         #
         # NB - this relies on the fact that the toys
-        #      are ordered by time and assiged sequential
+        #      are ordered by time and assigned sequential
         #      ids. 
         if (current_day <= max_day)
             # NB - possible no toys arrive on a day
@@ -87,7 +106,7 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
                     (days[day_idx] == current_day))
                     day_idx += 1;
                 end;
-                max_av_toy = max(max_av_toy, myToys[1,day_idx-1])
+                max_av_toy = max(max_av_toy, day_idx-1)
             end
         end
 
@@ -97,13 +116,10 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
             done_mask[eid] =  next_minutes[eid] < (day_start_minute + hrs._day_end) ? 1.0 : Inf
         end
         
-        tid_list  =  sort!([min_av_toy:max_av_toy],
-                           lt= (a,b) -> ((myToys[2,a] <= myToys[2,b]) & (myToys[3,a] > myToys[3,b])))
-                           #by= x -> myToys[3,x],
-                           #rev=true) 
-        for tid in tid_list
+        for oidx in [min_av_toy:max_av_toy]
 
-            if (toy_done[tid])
+            tid = toy_order[oidx]
+            if (toy_done[oidx])
                 continue
             end
             
@@ -120,8 +136,6 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
             start_times = max(arrival, next_minutes, day_start_minute + hrs._day_start)
             work_times  = int(ceil(duration ./ ratings))
             end_times   = start_times .+ work_times
-            #wait_times  = max(0, arrival .- next_minutes)
-            #rem_times   = max(0,(start_times .+ work_times ) - hrs._day_end)
 
             (mt, idx) = findmin(done_mask .* end_times)
 
@@ -135,14 +149,13 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
             if ((this_unsanctioned > 10) && (this_ratio > hrs_ratio))
                 # This assignment doesn't achieve the optimal ratio
                 # of sanctioned and unsanctioned hours. Reschedule
-                #println("$(tid) $(this_ratio) $(hrs_ratio) $(this_start_minute) $(this_duration) $(this_sanctioned) $(this_unsanctioned)")
                 continue
             end
 
             # Looks good, do the assignment
             assign_count[idx] += 1
             assignments[:,assign_count[idx],idx] = [tid; idx; this_start_minute; this_duration]
-            toy_done[tid] = true
+            toy_done[oidx] = true
 
             assigned_count += 1
             if ((assigned_count % 10000) == 0)
