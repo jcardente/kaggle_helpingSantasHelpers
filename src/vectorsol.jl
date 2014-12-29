@@ -87,11 +87,6 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
         day_start_minute = (current_day - 1) * hrs._minutes_in_24h
         
         println("Day: $(current_day) Done:$(assigned_count) $(sum(toy_done)) of $(length(toy_done)) $(min_av_toy) $(max_av_toy)")
-
-        if (current_day > 10)
-            println("Detected runaway, terminating early")
-            break
-        end
         
         # Add new toys and resort.
         #
