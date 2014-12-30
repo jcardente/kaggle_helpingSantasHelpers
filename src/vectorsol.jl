@@ -67,7 +67,8 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
     next_minutes = ones(Int64, num_elves)  .* hrs._day_start
     ratings      = ones(Float64,num_elves) .* elfs._start_rating
     assign_count = zeros(Int64, num_elves)
-    assignments  = zeros(Int64, 4, hrs._hours_per_day * 60, num_elves)
+    elf_day_max  = (hrs._hours_per_day +2) * 60
+    assignments  = zeros(Int64, 4, elf_day_max, num_elves)
     done_mask    = fill(Inf, num_elves)
     
     # Prep output file
@@ -80,33 +81,20 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
     min_av_toy     = 1
     max_av_toy     = 1
     last_minute    = 0
-    assigned_count = 0
+    done_count     = 0
+    daily_work     = 0
     while (!all(toy_done))
 
         current_day += 1
         day_start_minute = (current_day - 1) * hrs._minutes_in_24h
         
-        println("Day: $(current_day) Done:$(assigned_count) $(sum(toy_done)) of $(length(toy_done)) $(min_av_toy) $(max_av_toy)")
+        while ((day_idx <= length(days)) &&
+               (days[day_idx] <= current_day))
+            day_idx += 1;
+        end        
+        max_av_toy = min(day_idx-1, length(days))
         
-        # Add new toys and resort.
-        #
-        # NB - this relies on the fact that the toys
-        #      are ordered by time and assigned sequential
-        #      ids. 
-        if (current_day <= max_day)
-            # NB - possible no toys arrive on a day
-            if ((day_idx < length(days)) &&
-                (days[day_idx] == current_day))
-                while ((day_idx <= length(days)) &&
-                    (days[day_idx] == current_day))
-                    day_idx += 1;
-                end;
-                max_av_toy = max(max_av_toy, day_idx-1)
-            end
-        end
-
-        # iterate over toys until all plans full or
-        # no more available toys
+        # Check to see if an elf is working on a multi-day toy
         for eid in 1:num_elves
             done_mask[eid] =  next_minutes[eid] < (day_start_minute + hrs._day_end) ? 1.0 : Inf
         end
@@ -147,15 +135,12 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
                 continue
             end
 
-            # Looks good, do the assignment
+            # Looks good, assign toy to elf
             assign_count[idx] += 1
             assignments[:,assign_count[idx],idx] = [tid; idx; this_start_minute; this_duration]
             toy_done[oidx] = true
-
-            assigned_count += 1
-            if ((assigned_count % 10000) == 0)
-                @printf("Assigned toys: %d\n", assigned_count)
-            end
+            done_count    += 1
+            daily_work    += this_duration
             
             # Calculate end time
             this_work_end_time = this_start_minute + this_duration 
@@ -164,7 +149,6 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
             # Update elf
             if (this_unsanctioned > 0)             
                 this_next_minute = apply_resting_period(this_work_end_time, this_unsanctioned)       
-                done_mask[idx]   = Inf
             else
                 if (hrs.is_sanctioned_time(this_work_end_time))
                     this_next_minute = this_work_end_time
@@ -172,6 +156,10 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
                     this_next_minute = hrs.next_sanctioned_minute(this_work_end_time)
                 end
             end           
+
+            if (this_next_minute >= (day_start_minute + hrs._day_end))
+                done_mask[idx] = Inf
+            end
             
             next_minutes[idx] = this_next_minute
             ratings[idx]      = adjust_rating(ratings[idx],
@@ -203,6 +191,16 @@ function vectorSolve(toy_file, soln_file, num_elves, num_toys)
         ## Clear out the assignments matrix
         fill!(assignments,0)
         fill!(assign_count, 0)
+
+
+        ## Print some stats
+        @printf(STDERR, "D:%4d  C:%8d  R:%1.2f  U:%1.2f\n",
+                current_day, done_count, mean(ratings),
+                daily_work / (num_elves * hrs._hours_per_day * 60))
+        daily_work = 0
+
+        
+
 
     end
     close(wcsv)
