@@ -26,10 +26,10 @@ s = ArgParseSettings()
 end
 
 parsed_args = parse_args(s)
-num_elves   = parsed_args["nelves"]
-num_toys    = parsed_args["ntoys"]
-toy_file    = parsed_args["toy_file"]
-soln_file   = parsed_args["soln_file"]
+const num_elves   = parsed_args["nelves"]
+const num_toys    = parsed_args["ntoys"]
+const toy_file    = parsed_args["toy_file"]
+const soln_file   = parsed_args["soln_file"]
 
 start = time()
 last_minute, avg_prod = vectorSolve(toy_file, soln_file, num_elves, num_toys)
