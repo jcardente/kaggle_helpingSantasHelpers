@@ -97,12 +97,6 @@ function score_submission(sub_file, myToys, NUM_ELVES)
         old_rating = myElves[current_elf].rating
         elfs.update_elf(myElves[current_elf], myToys[current_toy], start_minute, duration)
 
-        ## if(current_elf == 1)
-        ##     @printf("E:%d T:%d S:%d D:%d R:%f N:%d\n",
-        ##             current_elf, current_toy, start_minute, duration,
-        ##             old_rating, myElves[current_elf].next_available_time)
-        ##     end
-        
     end
 
     if length(complete_toys) != length(myToys)
