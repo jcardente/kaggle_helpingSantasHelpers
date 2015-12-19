@@ -133,7 +133,6 @@ df$score <- score(total_minutes/(df$Rating * df$Elves), df$Elves)
 
 #+END_EXAMPLE
 
-
 ** <2014-12-12 Fri>
 
 Simple calculation. Rating will increase if the ratio sanctioned minutes to unsanctioned minutes is larger than,
@@ -169,7 +168,6 @@ n &= \frac{\log\left(\frac{4}{r}\right)}{\log(1.02)}
 
 This gives a way to predict how many sanctioned hours are required to get
 back to peak productivity.
-
 
 
 
@@ -238,3 +236,258 @@ end
 
 
 #+END_EXAMPLE
+** <2014-12-19 Fri>
+
+Getting an idea of the distribution of toys
+
+#+BEGIN_EXAMPLE
+using hrs
+
+myToys = readcsv("data/toys_rev2.csv", header=true)[1];
+
+size(myToys)
+(10000000,3)
+
+myToys[:,2] = map(convert_to_minute, myToys[:,2]);
+
+julia> maximum(myToys[:,3])
+47473.0
+
+julia> median(myToys[:,3])
+69.0
+
+julia> quantile(myToys[:,3],0.9)
+12435.0
+
+#+END_EXAMPLE
+
+Switching to R
+
+#+BEGIN_EXAMPLE
+
+
+as.POSIXct(arrival, "%Y %m %d %H %M", tz = 'UTC')
+
+myToys = read.csv("data/toys_rev2.csv", header=TRUE, stringsAsFactors=FALSE)
+
+refdate <- as.POSIXct("2014 1 1 0 0", "%Y %m %d %H %M", tz = 'UTC')
+myToys$Arrival_minute <- as.POSIXct(myToys$Arrival_time, "%Y %m %d %H %M", tz = 'UTC')
+myToys$Day <- as.integer(difftime(myToys$Arrival_minute,refdate,units=c("days")))
+
+arrivals.by.day <- aggregate(myToys$Day,list(myToys$Day), length)
+colnames(arrivals.by.day) <- c("Day","Arrivals")
+
+
+durations.by.day <- aggregate(myToys$Duration,list(myToys$Day), sum)
+colnames(durations.by.day) <- c("Day", "Durations")
+
+both.by.day <- merge(arrivals.by.day, durations.by.day, by="Day")
+both.by.day$avg.size <- both.by.day$Durations / both.by.day$Arrivals
+
+ggplot(both.by.day, aes(x=Day, y=Arrivals)) + geom_point()
+ggplot(both.by.day, aes(x=Day, y=Durations)) + geom_point()
+ggplot(both.by.day, aes(x=Day, y=avg.size)) + geom_point()
+
+# Days 294 to 309 but indexes are off by one
+both.by.day[295:310,]
+
+bubble <- both.by.day[295:310,]
+
+
+> colSums(bubble[,-1])
+    Arrivals    Durations     avg.size 
+2.250000e+06 2.518979e+10 1.791275e+05 
+
+#+END_EXAMPLE
+
+Days 295 to 310 are when the big burst hits - a 16 day span. 
+By then, need elves that are highly productive and minimize sanctioned time.
+
+
+Let's make this the training set!
+
+#+BEGIN_EXAMPLE
+> sum(foo$x[(foo$Group.1 > 280) & (foo$Group.1 < 295)])
+[1] 455885
+#+END_EXAMPLE
+
+
+#+BEGIN_EXAMPLE
+ratings <- seq(0.25, 4, 0.25)
+nelfs <- seq(500,900,50)
+
+testcases <- expand.grid(ratings, nelfs)
+colnames(testcases) <- c("Rating","NELFS")
+
+Arrivals <- bubble.all.df$Arrivals
+Avg_size <- bubble.all.df$Avg_size
+
+testcases$Minutes <- (Arrivals/testcases$NELFS) * (Avg_size/testcases$Rating)
+testcases$Score <- testcases$Minutes + log(1 + testcases$NELFS)
+
+ggplot(testcases,aes(x=NELFS, y=Rating, z=Score)) + stat_contour()
+
+adjust_rating <- function(rating, sanctioned, unsanctioned) {
+  max(0.25,
+      min(4.0, rating * (1.02 ^ (sanctioned/60)) *
+               (0.9 ^ (unsanctioned/60))))
+}
+
+sanctioned <- 10*60 * (Avg_size / (24*60))
+unsanctioned <- 14 * 60 * (Avg_size / (24*60))
+
+rating.ratio <- (1.02 ^ (sanctioned/60)) * (0.9 ^ (unsanctioned/60))
+
+arrivals.per.day <- Arrivals/16
+arrivals.per.day/900 * (Avg_size/0.25)
+[1] 6997163
+
+(Avg_size/4) * 900 + (Avg_size/0.25)* ((Arrivals-900)/900)
+
+
+ (Avg_size/4) * 900 + (Avg_size/0.25)* ((Arrivals-900)/900)
+
+
+est.score <- function (rating, nelves) {
+ (Avg_size/rating) * nelves + (Avg_size/0.25)* ((Arrivals-nelves)/nelves)
+}
+
+
+testcases$Score2 <- est.score(testcases$Rating, testcases$NELFS)
+
+ggplot(testcases,aes(x=NELFS, y=Rating, z=Score2)) + stat_contour()
+ggplot(testcases,aes(x=NELFS, y=Rating, fill=Score2)) + geom_tile()
+
+
+#+END_EXAMPLE
+
+
+** <2014-12-22 Mon>
+
+Oh fooey. Tried a full run over the weekend and it was super slow.
+Need a new plan. Going to try batching up jobs into larger jobs to
+make it easier to schedule.
+
+First going to refactor the code a bit to separate out the agent
+solution from the boiler plate command line execution code. 
+
+
+#+BEGIN_EXAMPLE
+maximum([t.arrival_minute for t in values(myToys)])
+
+idxs = sort([k for k in keys(myToys)]);
+arrivals = [myToys[i].arrival_minute for i in idxs];
+arr1 = arrivals[1:length(arrivals)-1];
+arr2 = arrivals[2:length(arrivals)];
+all(arr2 .>= arr1)
+  true
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+
+
+
+function tlt (a,b) 
+       (a[2] <= b[2]) & (a[3] > b[3])
+       end
+
+toyinfo = [(tid, myToys[tid].arrival_minute, myToys[tid].duration) 
+           for tid in 1:length(myToys)];
+sort!(toyinfo, lt=tlt)
+
+heights      = fill(540, 100)
+counts       = zeros(length(heights))
+total_work   = zeros(length(heights))
+assignments  = Array(Any, length(heights))
+for i in 1:length(heights)
+  assignments[i] = Int[]
+end
+foo = Any[]
+for tup in toyinfo
+   arrival  = tup[2]
+   duration = tup[3]
+
+   #if duration > 60
+   #  continue
+   #end 
+
+   wait_time = max(0, arrival .- heights)
+   work_time = wait_time + duration
+   rem_time  = 1140 - (heights + work_time)
+
+   unsanctioned_time = map( x -> (x < 0) ? abs(x) : 0, rem_time)
+
+   # If it doesn't fit nicely into any bucket then 
+   # don't assign it.
+   if (all(unsanctioned_time .> 30))
+      continue
+   end
+
+   left_time = map( x -> (x > 0) ? x : 0, 
+                          rem_time)
+
+   (mt, idx) = findmin(left_time .+ wait_time .+ unsanctioned_time)
+
+   this_wait_time    = wait_time[idx]
+   this_unsanctioned = unsanctioned_time[idx]
+
+   push!(assignments[idx], tup[1])
+   heights[idx]    += this_wait_time + duration
+   #total_work[idx] += work_time
+   counts[idx]     += 1
+
+   if ( this_unsanctioned > 0)
+      push!(foo, assignments[idx])
+      assignments[idx] = Int[]
+      heights[idx]     = 540
+      counts[idx]      = 0
+   end
+   
+end 
+
+
+
+
+
+
+function grokcombo(combolist)
+
+current_time = 540
+total_wait   = 0
+for tid in combolist
+  wait_time = max(0, myToys[tid].arrival_minute - current_time)
+  duration  = myToys[tid].duration
+
+  current_time += wait_time + duration
+  total_wait   += wait_time
+   
+end
+
+unsanctioned = max(0, current_time - 1140)
+
+current_time, total_wait, unsanctioned
+
+end
+
+
+
+function which_bucket(duration::Integer)
+  const limit = 5
+  duration < limit ? duration : limit+int32(log10(duration))
+end
+
+
+durations = Int[t.duration for t in myToys]
+#+END_EXAMPLE
+
+** <2014-12-29 Mon>
+
+Doing some experiments with 1M toys
+
+700 elves:
+Runtime= 88.73 	Score= 514352 	Prod=3.98	 LastMin=78497
+
+800 elves:
+Runtime= 93.07 	Score= 524820 	Prod=3.97	 LastMin=78497
+
+Full 10M
